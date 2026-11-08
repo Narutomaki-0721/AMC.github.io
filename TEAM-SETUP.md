@@ -5,6 +5,7 @@
 ## 本地验证
 
 ```sh
+python -m pip install -r requirements-import.txt
 npm ci
 npm test
 python -m unittest discover -s tests -p "test_*.py"
@@ -28,7 +29,8 @@ npm run dev
 - Actions secrets：RUNNER_KEY 与 Worker 相同；SEARCH_KEY 是 Brave Search API key；MODEL_KEY 只在执行收录时使用。
 - 主分支合并后，Knowledge Pages 工作流构建和发布。手动运行同一工作流可以刷新公开站点。Pages 工作流需要仓库允许 Pages 部署；收录工作流需要能提交内容到 main。如果分支规则强制一切修改走 PR，则需要调整执行器为 PR 发布流程。
 - 此版本的知识库文章公开。获发访问码的成员可对话、查看团队任务。审批成员可批准、拒绝、重做。输入的原始对话仅用于当前标签页，任务请求会存入 D1，模型调用本身仍经所配置的模型服务。
-- 收录器读取允许域的 HTML 原文，跳过重定向和无法解析的 PDF。官方赛程和赛题限定 COMAP 域。需扩展来源时修改 scripts/collect.py 的 ALLOWED。按任务编号生成固定输出路径，重复执行同一任务会复用已有页面。不同任务可引用同一来源。
+- “上传文档”提供四个 GitHub 上传入口。每次开发启动和正式构建都会把四个栏目目录中的 DOCX、PDF、TXT 转成 Markdown。MD 直接编译。自动生成的 *.imported.md 随原文件增删更新，不进入 Git。原文件公开可查。
+- AI 读取允许来源的网页、文本或 PDF，生成有出处的中文阅读笔记。赛题与赛程限定 COMAP。可把特定可公开转载的 HTTPS 文档 URL 填进 content-policy.json 的 full_text_urls 数组，收录时会附提取的正文。链接应直达原文，不跟随重定向。新 Worker 发布后，请求消息里的 HTTPS 链接会作为指定来源，不再依赖搜索。
 
 ## 验收路径
 

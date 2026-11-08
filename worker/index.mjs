@@ -27,6 +27,8 @@ async function chat(env,user,data){
  if(typeof result.reply!=='string')fail(502,'模型回复无效')
  if(!result.spec)return {reply:result.reply}
  const spec=validateSpec(result.spec)
+ const links=messages.at(-1).content.match(/https:\/\/[^\s<>"，。；、）】]+/g)||[]
+ if(links.length)spec.urls=[...new Set(links.map(link=>link.replace(/[),.;]+$/,'')))].slice(0,8)
  await env.DB.prepare('INSERT INTO tasks(id,author,created,request,page,spec) VALUES(?,?,?,?,?,?)').bind(id,user.name,now(),messages.at(-1).content,String(page||'').slice(0,300),JSON.stringify(spec)).run()
  return {reply:'已生成待审批任务：'+spec.title+'\n'+spec.section+' · '+spec.count+' 条\n'+spec.criteria,task:id}
 }

@@ -30,6 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+      - run: python -m pip install -r requirements-import.txt
       - id: collect
         run: python scripts/collect.py collect
         env:

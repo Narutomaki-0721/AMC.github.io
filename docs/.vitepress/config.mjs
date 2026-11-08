@@ -7,7 +7,8 @@ function entries(folder) {
     const path = folder + '/' + entry.name
     if (entry.isDirectory()) return [{text: entry.name, collapsed: true, items: entries(path)}]
     if (!entry.name.endsWith('.md')) return []
-    const title = readFileSync(join('docs',path),'utf8').match(/^# (.+)$/m)?.[1] || entry.name
+    const heading = readFileSync(join('docs',path),'utf8').match(/^# (.+)$/m)?.[1] || entry.name
+    const title = heading.replace(/&#(\d{1,7});/g, (entity, n) => Number(n) <= 0x10ffff ? String.fromCodePoint(Number(n)) : entity)
     return [{text:title,link:'/'+path.slice(0,-3)}]
   })
 }
@@ -15,6 +16,6 @@ export default defineConfig({
   lang:'zh-CN', title:'建模手记', description:'MCM / ICM 团队备赛知识库',
   base:process.env.SITE_BASE || '/',
   themeConfig:{siteTitle:'建模手记',outlineTitle:'本页目录',search:{provider:'local'},
-    nav:[{text:'知识目录',link:'/'},{text:'任务流',link:'/tasks'}],
+nav:[{text:'知识目录',link:'/'},{text:'上传文档',link:'/upload'},{text:'任务流',link:'/tasks'}],
     sidebar:groups.map(([folder,text])=>({text,collapsed:false,items:entries(folder)}))}
 })

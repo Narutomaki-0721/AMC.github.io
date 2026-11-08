@@ -7,3 +7,4 @@ __pycache__/
 *.sqlite*
 .env
 worker/wrangler.jsonc
+docs/**/*.imported.md
