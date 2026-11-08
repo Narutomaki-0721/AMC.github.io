@@ -1,0 +1,15 @@
+{
+  "name":"mcm-team-api",
+  "main":"index.mjs",
+  "compatibility_date":"2025-06-01",
+  "triggers":{"crons":["*/5 * * * *"]},
+  "d1_databases":[{"binding":"DB","database_name":"mcm-hub","database_id":"REPLACE_WITH_D1_ID"}],
+  "vars":{
+    "SITE_ORIGIN":"https://narutomaki-0721.github.io",
+    "SITE_BASE":"/AMC.github.io/",
+    "REPO":"Narutomaki-0721/AMC.github.io",
+    "BRANCH":"main",
+    "MODEL_URL":"https://api.openai.com/v1/chat/completions",
+    "MODEL_NAME":"REPLACE_WITH_MODEL_ID"
+  }
+}
