@@ -1,0 +1,71 @@
+name: Approved knowledge request
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        required: true
+        type: string
+      attempt:
+        required: true
+        type: string
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: pages-from-main
+  cancel-in-progress: false
+jobs:
+  collect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment: github-pages
+    env:
+      TASK_ID: ${{ inputs.task }}
+      ATTEMPT: ${{ inputs.attempt }}
+      RUNNER_KEY: ${{ secrets.RUNNER_KEY }}
+      API_URL: ${{ vars.API_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - id: collect
+        run: python scripts/collect.py collect
+        env:
+          SEARCH_KEY: ${{ secrets.SEARCH_KEY }}
+          MODEL_KEY: ${{ secrets.MODEL_KEY }}
+          MODEL_NAME: ${{ vars.MODEL_NAME }}
+          MODEL_URL: ${{ vars.MODEL_URL }}
+      - if: steps.collect.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.collect.outputs.skip != 'true'
+        run: npm ci && npm run build
+        env:
+          SITE_BASE: /AMC.github.io/
+          VITE_API_URL: ${{ vars.API_URL }}
+      - if: steps.collect.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/
+          if ! git diff --cached --quiet; then
+            git commit -m "Archive approved request $TASK_ID"
+            git push origin HEAD:main
+          fi
+          echo "CONTENT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - if: steps.collect.outputs.skip != 'true'
+        uses: actions/configure-pages@v5
+      - if: steps.collect.outputs.skip != 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/.vitepress/dist
+      - if: steps.collect.outputs.skip != 'true'
+        uses: actions/deploy-pages@v4
+      - if: steps.collect.outputs.skip != 'true'
+        run: python scripts/collect.py success
+      - if: failure() && steps.collect.outcome == 'success' && steps.collect.outputs.skip != 'true'
+        run: python scripts/collect.py failure

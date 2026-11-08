@@ -1,0 +1,9 @@
+node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+.dev.vars
+.wrangler/
+__pycache__/
+*.sqlite*
+.env
+worker/wrangler.jsonc
