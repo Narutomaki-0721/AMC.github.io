@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "python scripts/documents.py",
-    "prebuild": "python scripts/documents.py",
+    "predev": "python scripts/documents.py && python scripts/knowledge.py",
+    "prebuild": "python scripts/documents.py && python scripts/knowledge.py",
     "dev": "vitepress dev docs",
     "build": "vitepress build docs",
     "preview": "vitepress preview docs",

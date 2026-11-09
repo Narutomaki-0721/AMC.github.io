@@ -8,3 +8,5 @@ __pycache__/
 .env
 worker/wrangler.jsonc
 docs/**/*.imported.md
+
+docs/public/knowledge.json

@@ -22,6 +22,7 @@ test('chat, authorization, approval races, failure, retry and publication',async
  MEMBERS_JSON:JSON.stringify({[hash(token)]:{name:'member'},[hash(admin)]:{name:'reviewer',approver:true}}),RUNNER_KEY:'runner-key',DISPATCH_TOKEN:'test-token'}
  let dispatchCount=0
  t.mock.method(globalThis,'fetch',async url=>{
+ if(String(url).endsWith('/knowledge.json'))return Response.json([{title:'实例',heading:'实例',body:'已有资料 [来源](https://example.edu/source)',path:'resources/example.html'}])
  if(String(url).includes('api.github.com')){dispatchCount++;return new Response(null,{status:204})}
  return Response.json({choices:[{message:{content:JSON.stringify({reply:'好的',spec:{title:'优化资料',section:'参考资料文档',count:1,criteria:'包含实例',query:'integer optimization'}})}}]})
  })
@@ -29,6 +30,11 @@ test('chat, authorization, approval races, failure, retry and publication',async
  async function api(path,body,key=admin){const r=await worker.fetch(new Request('https://api.example'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+key},body:body?JSON.stringify(body):undefined}),env,{waitUntil:p=>pending.push(p)});return [r.status,await r.json()]}
  const id=crypto.randomUUID()
  const input={id,messages:[{role:'user',content:'请收录优化资料'}]}
+ const duplicate=await api('/chat',{...input,id:crypto.randomUUID(),messages:[{role:'user',content:'请收录 https://example.edu/source'}]},token)
+ assert.equal(duplicate[0],200)
+ assert.equal(duplicate[1].task,undefined)
+ assert.equal(duplicate[1].refs[0].path,'resources/example.html')
+ assert.equal((await api('/tasks',null,token))[1].tasks.length,0)
  assert.equal((await api('/chat',input,token))[1].task,id)
  assert.equal((await api('/tasks/'+id+'/approve',{},token))[0],403)
  const approvals=await Promise.all([api('/tasks/'+id+'/approve',{}),api('/tasks/'+id+'/approve',{})])

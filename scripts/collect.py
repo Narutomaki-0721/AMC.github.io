@@ -189,6 +189,16 @@ def collect_batches(spec, notify=callback):
     if sum(b["count"] for b in plan) != spec["count"] or any(not 1 <= b["count"] <= 8 for b in plan):
         raise ValueError("分批数量与已审批目标不一致")
     used = set()
+    archived = set()
+    if not spec.get("update"):
+        if __package__:
+            from .knowledge import passages
+        else:
+            from knowledge import passages
+        for passage in passages():
+            archived.update(urllib.parse.urldefrag(url)[0] for url in re.findall(
+                r'https?://[^\s<>"\)]+', passage["body"]))
+
     all_items = []
     for i, batch in enumerate(plan):
         prefix = f"第 {i+1}/{len(plan)} 批 · {batch['label']}"
@@ -197,7 +207,7 @@ def collect_batches(spec, notify=callback):
         items = notify("load_batch",batch=i)["items"]
         if items is None:
             notify("progress",message=prefix+" · 正在收录")
-            candidates = source_candidates(batch_spec,set(used))
+            candidates = source_candidates(batch_spec,used | archived)
             items = []
             letters = set()
             try:
@@ -218,7 +228,7 @@ def collect_batches(spec, notify=callback):
                 raise ValueError(f"{prefix}：{error}") from error
             if len(items)!=batch["count"]:
                 missing = "".join(letter for letter in batch.get("letters","") if letter not in letters)
-                raise ValueError(f"{prefix}：匹配 {len(items)}/{batch['count']} 条"+(f"，缺 {missing} 题" if missing else ""))
+                raise ValueError(f"{prefix}：排除知识库已有来源后匹配 {len(items)}/{batch['count']} 条"+(f"，缺 {missing} 题" if missing else ""))
             if batch.get("letters"):
                 items.sort(key=lambda item: item["letter"])
             saved = notify("save_batch",batch=i,items=items)["saved"]
@@ -226,6 +236,8 @@ def collect_batches(spec, notify=callback):
         else:
             stage = "沿用已完成批次"
         urls = {item["url"] for item in items}
+        if urls & archived:
+            raise ValueError(f"{prefix}：已完成批次的来源现已入库，请重新检查收录范围")
         if len(urls)!=batch["count"] or used.intersection(urls):
             raise ValueError(f"{prefix}：来源重复或数量不符")
         used.update(urls)
