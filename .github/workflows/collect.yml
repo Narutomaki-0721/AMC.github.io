@@ -4,7 +4,7 @@ on:
     - cron: '7,22,37,52 * * * *'
   push:
     branches: [main]
-    paths: ['.github/workflows/collect.yml', 'scripts/runner_access.py']
+    paths: ['.github/workflows/collect.yml', 'scripts/runner_access.py', 'scripts/collect.py', 'scripts/discovery.py']
   workflow_dispatch:
     inputs:
       task:
