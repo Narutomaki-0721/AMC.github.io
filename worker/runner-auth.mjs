@@ -16,8 +16,8 @@ export async function authorizeRunner(req, env, event, run, keySet=keys) {
        payload.workflow_ref!==env.REPO+'/.github/workflows/collect.yml@'+branch ||
        !['schedule','workflow_dispatch','push'].includes(payload.event_name) ||
        run!==payload.run_id+'.'+payload.run_attempt ||
-       (event!=='next' && payload.environment!=='github-pages')) throw Error()
-  } catch {
-    throw Object.assign(Error('无执行权限'),{status:403})
+       (event!=='next' && payload.environment!=='github-pages')) throw Error('claims')
+  } catch (error) {
+    throw Object.assign(Error('无执行权限 · '+(error.code || (error.message==='claims'?'identity':'signature'))),{status:403})
   }
 }
