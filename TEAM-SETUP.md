@@ -20,7 +20,7 @@ npm run dev
 1. 在 Cloudflare 账户创建 D1 数据库。复制 worker/wrangler.example.jsonc 为同目录的 wrangler.jsonc，填数据库 ID、模型地址和模型标识。使用支持 JSON 输出的 Chat Completions 兼容模型。SITE_ORIGIN 是 Pages 的域名，SITE_BASE 是项目路径。
 2. 在 worker 目录通过 Wrangler 执行 `wrangler d1 execute mcm-hub --remote --file schema.sql`。本地调试用 --local。
 3. 使用 `wrangler secret put NAME` 设置 MODEL_KEY、MEMBERS_JSON。REPO_ID 填 GitHub 仓库的数字 ID。GitHub 每 15 分钟计划检查已批准的任务，实际开始时间由 GitHub 排队决定；也可以在 Actions 手动运行 Approved knowledge request 并留空输入。回报默认用 GitHub OIDC 短时令牌，验证仓库 ID、主分支、工作流、运行编号和发布环境。DISPATCH_TOKEN 是可选的即时派发设置。
-4. 每个成员用独立随机访问码。运行 `node scripts/member-code.mjs` 生成 256 位随机访问码和 SHA-256。将访问码私下交给该成员，MEMBERS_JSON 设置为形如 `{"成员访问码的sha256":{"name":"队长","approver":true}}` 的对象。移除对应哈希即撤销权限。成员输入的访问码仅保存在当前标签页的 sessionStorage。
+4. 一个访问码对应一个成员身份；同一码可由不同设备和 IP 同时使用。多人共享普通码时，任务记录显示同一成员名。需要区分提交人时分别发码。运行 `node scripts/member-code.mjs` 生成 256 位随机访问码和 SHA-256。将访问码私下交给该成员，MEMBERS_JSON 设置为形如 `{"成员访问码的sha256":{"name":"队长","approver":true}}` 的对象。移除对应哈希即撤销权限。成员可粘贴访问码或清单中自己的一整行。登录后可在当前标签页使用，浏览器不允许会话存储时仍可使用至刷新；退出一个标签页不影响其他设备。
 5. 运行 `wrangler deploy`，记下返回的 HTTPS 地址。开发调试可用 `wrangler dev` 及不提交的 .dev.vars。不要将 .dev.vars 放进 Git。
 
 ## GitHub 设置
