@@ -19,7 +19,7 @@ jobs:
   collect:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 55
     environment: github-pages
     env:
       TASK_ID: ${{ inputs.task }}

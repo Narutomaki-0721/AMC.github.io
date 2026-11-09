@@ -12,4 +12,7 @@ CREATE TRIGGER IF NOT EXISTS start_attempt AFTER UPDATE OF attempt ON tasks
 WHEN NEW.attempt>OLD.attempt BEGIN
  INSERT INTO attempts(task,n) VALUES(NEW.id,NEW.attempt);
 END;
+CREATE TABLE IF NOT EXISTS collection_batches (
+ task TEXT NOT NULL, batch INTEGER NOT NULL, items TEXT NOT NULL, PRIMARY KEY(task,batch)
+);
 CREATE INDEX IF NOT EXISTS task_status ON tasks(status,created);

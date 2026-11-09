@@ -1,8 +1,9 @@
+import { planCollection } from './collection-plan.mjs'
 const sections=['赛程消息','历年赛题收集','参考资料文档','笔记与练习']
 const now=()=>new Date().toISOString()
 function fail(status,message){throw Object.assign(Error(message),{status})}
 export function validateSpec(s){
- if(!s||!sections.includes(s.section)||!Number.isInteger(s.count)||s.count<1||s.count>8)fail(422,'模型未生成有效的归档栏目或数量')
+ if(!s||!sections.includes(s.section)||!Number.isInteger(s.count))fail(422,'模型未生成有效的归档栏目或数量')
  for(const key of ['title','criteria','query'])if(typeof s[key]!=='string'||!s[key].trim()||s[key].length>1600)fail(422,'任务字段不完整')
  return Object.fromEntries(['title','section','count','criteria','query'].map(k=>[k,s[k]]))
 }
@@ -20,17 +21,15 @@ async function chat(env,user,data){
  messages.some(m=>!['assistant','user'].includes(m.role)||typeof m.content!=='string'||m.content.length>4000)||messages.at(-1).role!=='user')fail(400,'请求格式不正确')
  const existing=await env.DB.prepare('SELECT id,author FROM tasks WHERE id=?').bind(id).first()
  if(existing){if(existing.author!==user.name)fail(409,'编号已被使用');return {reply:'任务已进入待审批。',task:id}}
- const instruction='你是美赛备赛助手。输出 JSON，普通问答返回 {reply:string}。用户明确要求收录或更新知识库时，额外输出 spec:{title,section,count,criteria,query}。section 从 '+sections.join('、')+' 中选择，count 为1到8。criteria 完整保留用户要求。不要声称任务已经执行。'
+ const instruction='你是美赛备赛助手。输出 JSON，普通问答返回 {reply:string}。用户明确要求收录或更新知识库时，额外输出 spec:{title,section,count,criteria,query}。section 从 '+sections.join('、')+' 中选择，count 填请求的总来源数，最多64，不要缩小数量。criteria 完整保留用户要求。不要声称任务已经执行。'
  const response=await fetch(env.MODEL_URL,{method:'POST',headers:{Authorization:'Bearer '+env.MODEL_KEY,'Content-Type':'application/json'},body:JSON.stringify({model:env.MODEL_NAME,messages:[{role:'system',content:instruction},...messages.map(({role,content})=>({role,content}))],response_format:{type:'json_object'}}),signal:AbortSignal.timeout(60000)})
  if(!response.ok)fail(502,'模型服务暂时无法完成请求 ('+response.status+')')
  const result=JSON.parse((await response.json()).choices[0].message.content)
  if(typeof result.reply!=='string')fail(502,'模型回复无效')
  if(!result.spec)return {reply:result.reply}
- const spec=validateSpec(result.spec)
- const links=messages.at(-1).content.match(/https:\/\/[^\s<>"，。；、）】]+/g)||[]
- if(links.length)spec.urls=[...new Set(links.map(link=>link.replace(/[),.;]+$/,'')))].slice(0,8)
+ const spec=planCollection(validateSpec(result.spec), messages.at(-1).content)
  await env.DB.prepare('INSERT INTO tasks(id,author,created,request,page,spec) VALUES(?,?,?,?,?,?)').bind(id,user.name,now(),messages.at(-1).content,String(page||'').slice(0,300),JSON.stringify(spec)).run()
- return {reply:'已生成待审批任务：'+spec.title+'\n'+spec.section+' · '+spec.count+' 条\n'+spec.criteria,task:id}
+ return {reply:'已生成待审批任务：'+spec.title+'\n'+spec.section+' · '+spec.count+' 条，分 '+spec.batches.length+' 批\n'+spec.criteria,task:id}
 }
 export async function decide(db,id,action,user){
  if(!user.approver)fail(403,'需要审批权限')
@@ -50,6 +49,11 @@ async function pump(env){
  if(a.run){if(a.touched<time-3600000)await finish(env,a.task,a.n,a.run,false,'执行超时，未收到完成回报');continue}
  const reservation=await env.DB.prepare('UPDATE attempts SET touched=? WHERE task=? AND n=? AND touched=? AND run IS NULL').bind(time,a.task,a.n,a.touched).run()
  if(!reservation.meta.changes)continue
+ const missing=['DISPATCH_TOKEN','RUNNER_KEY'].filter(key=>!env[key])
+ if(missing.length){
+   await finish(env,a.task,a.n,null,false,'执行配置缺少 '+missing.join('、')+'，配置后再重做')
+   continue
+ }
  const r=await fetch('https://api.github.com/repos/'+env.REPO+'/actions/workflows/collect.yml/dispatches',{method:'POST',headers:{Authorization:'Bearer '+env.DISPATCH_TOKEN,'User-Agent':'mcm-hub','Content-Type':'application/json'},body:JSON.stringify({ref:env.BRANCH||'main',inputs:{task:a.task,attempt:String(a.n)}})})
  if(!r.ok)await finish(env,a.task,a.n,null,false,'GitHub 派发失败，HTTP '+r.status)
  }
@@ -63,7 +67,7 @@ async function finish(env,id,n,run,success,message,url=null){
 }
 async function runner(req,env){
  if(!env.RUNNER_KEY||req.headers.get('Authorization')!=='Bearer '+env.RUNNER_KEY)fail(403,'无执行权限')
- const {id,n,run,event,message,path}=await req.json()
+ const {id,n,run,event,message,path,batch,items}=await req.json()
  const db=env.DB
  if(event==='claim'){
  const reservation=await db.prepare("UPDATE attempts SET run=?,touched=?,stage='检索中' WHERE task=? AND n=? AND run IS NULL AND stage='排队中' AND EXISTS(SELECT 1 FROM tasks WHERE id=? AND attempt=? AND status='running')").bind(run,Date.now(),id,n,id,n).run()
@@ -73,6 +77,21 @@ async function runner(req,env){
  }
  const a=await db.prepare('SELECT a.run FROM attempts a JOIN tasks t ON t.id=a.task WHERE a.task=? AND a.n=? AND t.attempt=a.n AND t.status=\'running\'').bind(id,n).first()
  if(!a||a.run!==run)fail(409,'该次执行已结束')
+ if(event==='load_batch'||event==='save_batch'){
+   const task=await db.prepare('SELECT spec FROM tasks WHERE id=?').bind(id).first()
+   const spec=JSON.parse(task.spec)
+   const plan=spec.batches||[{count:spec.count}]
+   if(!Number.isInteger(batch)||!plan[batch])fail(400,'批次编号无效')
+   if(event==='load_batch'){
+     const row=await db.prepare('SELECT items FROM collection_batches WHERE task=? AND batch=?').bind(id,batch).first()
+     return {items:row?JSON.parse(row.items):null}
+   }
+   if(!Array.isArray(items)||items.length!==plan[batch].count)fail(400,'该批来源数量不符')
+   const data=JSON.stringify(items)
+   if(new TextEncoder().encode(data).length>1_500_000)return {saved:false}
+   await db.prepare("INSERT OR IGNORE INTO collection_batches(task,batch,items) SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM tasks WHERE id=? AND attempt=? AND status='running')").bind(id,batch,data,id,n).run()
+   return {saved:true}
+ }
  const detail=String(message||'').slice(0,1200)
  if(event==='progress')await db.prepare('UPDATE attempts SET stage=?,log=log||?,touched=? WHERE task=? AND n=?').bind(detail,'\n'+now()+' '+detail,Date.now(),id,n).run()
  else if(event==='failure'||event==='success'){

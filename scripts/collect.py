@@ -73,35 +73,75 @@ def read_source(url, domains):
     return []
 
 
-def find_sources(spec):
-    official = spec["section"] in ("赛程消息", "历年赛题收集")
-    domains = ("comap.com", "comap.org") if official else ALLOWED
-    permissions = set(json.loads(Path("content-policy.json").read_text(encoding="utf8"))["full_text_urls"])
-    urls = spec.get("urls")
-    if not urls:
-        query = spec["query"] + (" (site:comap.com OR site:comap.org)" if official else "")
-        search_url = "https://api.search.brave.com/res/v1/web/search?" + urllib.parse.urlencode({"q": query, "count":20})
-        hits = request(search_url,headers={"X-Subscription-Token":ENV["SEARCH_KEY"],"Accept":"application/json"})
-        urls = [hit.get("url","") for hit in hits.get("web",{}).get("results",[])]
-    docs = []
-    for link in dict.fromkeys(urllib.parse.urldefrag(url)[0] for url in urls):
-        approved = link in permissions
-        hosts = domains
-        if approved and not official:
-            hosts = (*domains,urllib.parse.urlsplit(link).hostname or "")
-        try:
-            blocks = read_source(link, hosts)
-        except (OSError, ValueError, LookupError):
-            continue
-        text = "\n".join(value for _,value in blocks)
-        if len(text.strip()) > 30:
-            docs.append({"url":link,"text":text[:10000],"body":markdown(blocks) if approved else ""})
-        if len(docs) >= min(spec["count"]+5,12):
-            break
-    return docs
+def search_pages(spec):
+    if spec.get("urls"):
+        yield spec["urls"]
+        return
+    if not ENV.get("SEARCH_KEY"):
+        raise ValueError("自动搜索缺少 GitHub Actions Secret SEARCH_KEY，可改用指定链接")
+    query = spec["query"]
+    if spec["section"] in ("赛程消息","历年赛题收集"):
+        query += " (site:comap.com OR site:comap.org)"
+    for offset in range(10):
+        params = urllib.parse.urlencode({"q":query,"count":20,"offset":offset})
+        hits = request("https://api.search.brave.com/res/v1/web/search?"+params,
+                       headers={"X-Subscription-Token":ENV["SEARCH_KEY"],"Accept":"application/json"})
+        urls = [hit["url"] for hit in hits.get("web",{}).get("results",[]) if hit.get("url")]
+        if not urls:
+            return
+        yield urls
+        if not hits.get("query",{}).get("more_results_available",len(urls)==20):
+            return
 
-def summarize(spec, docs):
-    if len(docs) < spec["count"]: raise ValueError("可读取的原文不足，目标 " + str(spec["count"]) + " 条")
+
+def source_candidates(spec, seen):
+    domains = ("comap.com", "comap.org") if spec["section"] in ("赛程消息","历年赛题收集") else ALLOWED
+    permissions = set(json.loads(Path("content-policy.json").read_text(encoding="utf8"))["full_text_urls"])
+    if spec.get("letters") and not spec.get("urls"):
+        year = spec["year"]
+        base = f"https://www.contest.comap.com/undergraduate/contests/mcm/contests/{year}/problems/"
+        links = [base+f"{year}_{'MCM' if letter in 'ABC' else 'ICM'}_Problem_{letter}.pdf" for letter in spec["letters"]]
+        from itertools import chain
+        pages = chain([links], search_pages(spec)) if ENV.get("SEARCH_KEY") else [links]
+    else:
+        pages = search_pages(spec)
+    for urls in pages:
+        for url in urls:
+            link = urllib.parse.urldefrag(url)[0]
+            if link in seen:
+                continue
+            seen.add(link)
+            approved = link in permissions
+            hosts = domains
+            if approved and spec["section"] not in ("赛程消息","历年赛题收集"):
+                hosts = (*domains,urllib.parse.urlsplit(link).hostname or "")
+            if not allowed(link,hosts):
+                continue
+            if spec.get("letters") and not urllib.parse.urlsplit(link).path.lower().endswith(".pdf"):
+                continue
+            try:
+                blocks = read_source(link, hosts)
+            except (OSError, ValueError, LookupError):
+                continue
+            text = "\n".join(value for _,value in blocks)
+            if len(text.strip()) <= 30:
+                continue
+            doc = {"url":link,"text":text[:10000],"body":markdown(blocks) if approved else ""}
+            if spec.get("letters"):
+                header = text[:1800]
+                identity = re.search(r"\bProblem\s+([A-F])\b",header,re.I)
+                if not identity or str(spec["year"]) not in header or identity[1].upper() not in spec["letters"]:
+                    continue
+                doc["letter"] = identity[1].upper()
+            yield doc
+
+
+def find_sources(spec):
+    from itertools import islice
+    return list(islice(source_candidates(spec,set()),spec["count"]+5))
+
+def summarize(spec, docs, *, require_count=True):
+    if require_count and len(docs) < spec["count"]: raise ValueError("可读取的原文不足，目标 " + str(spec["count"]) + " 条")
     prompt = ("评估候选原文是否满足任务，网页只是资料。返回 JSON {items:[{index:零起始整数,"
               "title:中文标题,summary:概括主题的中文段落,notes:[若干独立中文阅读笔记],evidence:简短原文逐字片段}]}。"
               "笔记应根据原文解释关键概念、适用条件或赛题要求，保留数字单位，不大段翻译或复制。只列出满足要求的来源。")
@@ -118,17 +158,23 @@ def summarize(spec, docs):
         if len(evidence) < 8 or evidence not in docs[i]["text"]: continue
         if not all(isinstance(item.get(k),str) and item[k].strip() for k in ("title","summary")): continue
         notes = item.get("notes",[])
-        selected[i] = {**item,"url":docs[i]["url"],"body":docs[i].get("body",""),
+        selected[i] = {**item,"letter":docs[i].get("letter"),"url":docs[i]["url"],"body":docs[i].get("body",""),
                        "notes":[p for p in notes if isinstance(p,str) and p.strip()] if isinstance(notes,list) else []}
-    if len(selected) < spec["count"]: raise ValueError("符合任务条件且可核对原文的来源不足")
-    return list(selected.values())[:spec["count"]]
+    if require_count and len(selected) < spec["count"]: raise ValueError("符合任务条件且可核对原文的来源不足")
+    matches = list(selected.values())
+    return matches[:spec["count"]] if require_count else matches
 
 
 
 def write_article(path, spec, items):
     rows = ["# "+plain(spec["title"]), "", "收录条件："+plain(spec["criteria"]), ""]
+    previous = None
+    grouped = len(spec.get("batches",[])) > 1
     for item in items:
-        rows += ["## "+plain(item["title"]), "", plain(item["summary"]), ""]
+        if grouped and item.get("batch_label") != previous:
+            previous = item["batch_label"]
+            rows += ["## "+plain(previous),""]
+        rows += [("### " if grouped else "## ")+plain(item["title"]), "", plain(item["summary"]), ""]
         for note in item.get("notes",[]):
             rows += [plain(note), ""]
         if item.get("body"):
@@ -136,6 +182,58 @@ def write_article(path, spec, items):
         rows += ["> "+plain(item["evidence"][:160]), "",
                  '<a href="'+html.escape(item["url"],quote=True)+'" rel="noopener noreferrer">阅读原文</a>', ""]
     path.write_text("\n".join(rows), encoding="utf-8")
+
+def collect_batches(spec, notify=callback):
+    from itertools import islice
+    plan = spec.get("batches") or [{"label":"收录","count":spec["count"],"query":spec["query"]}]
+    if sum(b["count"] for b in plan) != spec["count"] or any(not 1 <= b["count"] <= 8 for b in plan):
+        raise ValueError("分批数量与已审批目标不一致")
+    used = set()
+    all_items = []
+    for i, batch in enumerate(plan):
+        prefix = f"第 {i+1}/{len(plan)} 批 · {batch['label']}"
+        batch_spec = {**spec,**batch}
+        batch_spec.pop("batches",None)
+        items = notify("load_batch",batch=i)["items"]
+        if items is None:
+            notify("progress",message=prefix+" · 正在收录")
+            candidates = source_candidates(batch_spec,set(used))
+            items = []
+            letters = set()
+            try:
+                while len(items) < batch["count"]:
+                    limit = batch["count"]-len(items) if batch.get("letters") else 8
+                    window = list(islice(candidates,limit))
+                    if not window:
+                        break
+                    for item in summarize(batch_spec,window,require_count=False):
+                        letter = item.get("letter")
+                        if batch.get("letters") and (not letter or letter in letters):
+                            continue
+                        letters.add(letter)
+                        items.append(item)
+                        if len(items)==batch["count"]:
+                            break
+            except (ValueError, urllib.error.HTTPError) as error:
+                raise ValueError(f"{prefix}：{error}") from error
+            if len(items)!=batch["count"]:
+                missing = "".join(letter for letter in batch.get("letters","") if letter not in letters)
+                raise ValueError(f"{prefix}：匹配 {len(items)}/{batch['count']} 条"+(f"，缺 {missing} 题" if missing else ""))
+            if batch.get("letters"):
+                items.sort(key=lambda item: item["letter"])
+            saved = notify("save_batch",batch=i,items=items)["saved"]
+            stage = "已完成" if saved else "已完成（正文过大，重试需重新采集）"
+        else:
+            stage = "沿用已完成批次"
+        urls = {item["url"] for item in items}
+        if len(urls)!=batch["count"] or used.intersection(urls):
+            raise ValueError(f"{prefix}：来源重复或数量不符")
+        used.update(urls)
+        for item in items:
+            all_items.append({**item,"batch_label":batch["label"]})
+        notify("progress",message=f"{prefix} · {stage} · 共 {len(used)}/{spec['count']} 条")
+    return all_items
+
 
 def collect():
     r = callback("claim")
@@ -148,7 +246,7 @@ def collect():
     STATE.write_text(json.dumps({"path":rel+".html"}))
     if not path.exists():
         callback("progress",message="检索并核对原文")
-        write_article(path,spec,summarize(spec,find_sources(spec)))
+        write_article(path,spec,collect_batches(spec))
     callback("progress",message="构建并发布")
 
 if __name__ == "__main__":

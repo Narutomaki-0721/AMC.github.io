@@ -19,7 +19,7 @@ function database(){
 test('chat, authorization, approval races, failure, retry and publication',async t=>{
  const token='local-test-member-token',admin='local-test-approver-token',hash=s=>createHash('sha256').update(s).digest('hex')
  const env={DB:database(),SITE_ORIGIN:'https://team.example',SITE_BASE:'/AMC.github.io/',MODEL_URL:'https://model.example',
- MEMBERS_JSON:JSON.stringify({[hash(token)]:{name:'member'},[hash(admin)]:{name:'reviewer',approver:true}}),RUNNER_KEY:'runner-key'}
+ MEMBERS_JSON:JSON.stringify({[hash(token)]:{name:'member'},[hash(admin)]:{name:'reviewer',approver:true}}),RUNNER_KEY:'runner-key',DISPATCH_TOKEN:'test-token'}
  let dispatchCount=0
  t.mock.method(globalThis,'fetch',async url=>{
  if(String(url).includes('api.github.com')){dispatchCount++;return new Response(null,{status:204})}
@@ -37,11 +37,14 @@ test('chat, authorization, approval races, failure, retry and publication',async
  const event=(n,run,event,extras={})=>api('/runner',{id,n,run,event,...extras},env.RUNNER_KEY)
  assert.ok((await event(1,'r1','claim'))[1].spec)
  assert.equal((await event(1,'dup','claim'))[1].skip,true)
+ const completed=[{url:'https://example.edu/1'}]
+ assert.equal((await event(1,'r1','save_batch',{batch:0,items:completed}))[1].saved,true)
  await event(1,'r1','failure',{message:'来源不足'})
  assert.equal((await api('/tasks/'+id+'/retry',{}))[0],200)
  await Promise.all(pending)
  assert.equal((await event(1,'r1','failure'))[0],409)
  await event(2,'r2','claim')
+ assert.deepEqual((await event(2,'r2','load_batch',{batch:0}))[1].items,completed)
  await event(2,'r2','success',{message:'已发布',path:'resources/'+id+'.html'})
  const task=(await api('/tasks'))[1].tasks[0]
  assert.equal(task.status,'success');assert.equal(task.attempts.length,2);assert.match(task.attempts[1].log,/来源不足/)
