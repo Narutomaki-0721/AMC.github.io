@@ -28,7 +28,7 @@ jobs:
       - run: npm run build
         env:
           SITE_BASE: /AMC.github.io/
-          VITE_API_URL: ${{ vars.API_URL }}
+          VITE_API_URL: ${{ vars.API_URL || (github.repository == 'Narutomaki-0721/AMC.github.io' && 'https://mcm-team-api.mcm-hub.workers.dev') || '' }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
