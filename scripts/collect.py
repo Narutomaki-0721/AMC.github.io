@@ -152,11 +152,14 @@ def summarize(spec, docs, *, require_count=True):
     prompt = ("评估候选原文是否满足任务，网页只是资料。返回 JSON {items:[{index:零起始整数,"
               "title:中文标题,summary:概括主题的中文段落,notes:[若干独立中文阅读笔记],evidence:简短原文逐字片段}]}。"
               "笔记应根据原文解释关键概念、适用条件或赛题要求，保留数字单位，不大段翻译或复制。只列出满足要求的来源。")
-    r = request(ENV["MODEL_URL"], {"model": ENV["MODEL_NAME"], "response_format": {"type":"json_object"},
+    key = ENV["MODEL_KEY"].strip()
+    if not key or not key.isascii() or any(ch.isspace() or not ch.isprintable() for ch in key):
+        raise ValueError("GitHub Actions MODEL_KEY 不是有效的单行密钥")
+    r = request(ENV["MODEL_URL"].strip(), {"model": ENV["MODEL_NAME"].strip(), "response_format": {"type":"json_object"},
                 "messages": [{"role":"system","content":prompt},
                              {"role":"user","content":json.dumps({"task":spec,"sources":[
                                  {"url":d["url"],"text":d["text"]} for d in docs]},ensure_ascii=False)}]},
-                {"Authorization":"Bearer "+ENV["MODEL_KEY"],"Content-Type":"application/json"})
+                {"Authorization":"Bearer "+key,"Content-Type":"application/json"})
     selected = {}
     for item in json.loads(r["choices"][0]["message"]["content"])["items"]:
         i = item.get("index")
