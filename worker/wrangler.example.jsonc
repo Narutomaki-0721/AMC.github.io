@@ -8,6 +8,7 @@
     "SITE_ORIGIN":"https://narutomaki-0721.github.io",
     "SITE_BASE":"/AMC.github.io/",
     "REPO":"Narutomaki-0721/AMC.github.io",
+    "REPO_ID":"1450308510",
     "BRANCH":"main",
     "MODEL_URL":"https://api.openai.com/v1/chat/completions",
     "MODEL_NAME":"REPLACE_WITH_MODEL_ID"

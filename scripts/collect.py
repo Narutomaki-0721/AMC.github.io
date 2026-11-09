@@ -9,8 +9,10 @@ import urllib.parse
 import urllib.request
 import uuid
 if __package__:
+    from .runner_access import credential
     from .documents import html_blocks, pdf_blocks, plain, markdown
 else:
+    from runner_access import credential
     from documents import html_blocks, pdf_blocks, plain, markdown
 from pathlib import Path
 
@@ -32,7 +34,7 @@ def callback(event, **values):
         "id": str(uuid.UUID(ENV["TASK_ID"])), "n": int(ENV["ATTEMPT"]),
         "run": ENV["GITHUB_RUN_ID"] + "." + ENV["GITHUB_RUN_ATTEMPT"],
         "event": event, **values
-    }, {"Authorization": "Bearer " + ENV["RUNNER_KEY"], "Content-Type": "application/json"})
+    }, {"Authorization": "Bearer " + credential(), "Content-Type": "application/json"})
 
 # Domains and explicit full-text permissions are checked before fetching.
 
@@ -78,7 +80,12 @@ def search_pages(spec):
         yield spec["urls"]
         return
     if not ENV.get("SEARCH_KEY"):
-        raise ValueError("自动搜索缺少 GitHub Actions Secret SEARCH_KEY，可改用指定链接")
+        if __package__:
+            from .discovery import discover
+        else:
+            from discovery import discover
+        yield discover(spec)
+        return
     query = spec["query"]
     if spec["section"] in ("赛程消息","历年赛题收集"):
         query += " (site:comap.com OR site:comap.org)"

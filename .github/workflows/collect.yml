@@ -1,31 +1,73 @@
 name: Approved knowledge request
 on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  push:
+    branches: [main]
+    paths: ['.github/workflows/collect.yml', 'scripts/runner_access.py']
   workflow_dispatch:
     inputs:
       task:
-        required: true
+        required: false
         type: string
       attempt:
-        required: true
+        required: false
         type: string
 permissions:
   contents: write
   pages: write
   id-token: write
-concurrency:
-  group: pages-from-main
-  cancel-in-progress: false
+env:
+  API_URL: ${{ vars.API_URL || (github.repository == 'Narutomaki-0721/AMC.github.io' && 'https://mcm-team-api.mcm-hub.workers.dev') || '' }}
 jobs:
-  collect:
+  queue:
     if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      task: ${{ steps.next.outputs.task }}
+      attempt: ${{ steps.next.outputs.attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: next
+        run: python scripts/runner_access.py
+      - if: github.event_name == 'push'
+        run: python -m pip install -r requirements-import.txt
+      - if: github.event_name == 'push'
+        name: Verify source, model evidence and Markdown in temporary storage
+        env:
+          MODEL_KEY: ${{ secrets.MODEL_KEY }}
+          MODEL_NAME: ${{ vars.MODEL_NAME }}
+          MODEL_URL: ${{ vars.MODEL_URL }}
+        run: |
+          python - <<'PY'
+          import tempfile
+          from pathlib import Path
+          from scripts.collect import find_sources, summarize, write_article
+          spec = dict(section="参考资料文档", count=1, title="线性规划入门",
+                      criteria="解释 scipy.optimize.linprog 目标函数及线性约束",
+                      urls=["https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linprog.html"])
+          items = summarize(spec, find_sources(spec))
+          with tempfile.TemporaryDirectory() as temp:
+              path = Path(temp) / "sample.md"
+              write_article(path, spec, items)
+              assert spec["urls"][0] in path.read_text(encoding="utf8")
+          print("Verified official source, model evidence and Markdown rendering.")
+          PY
+  collect:
+    needs: queue
+    if: inputs.task || needs.queue.outputs.task
+    concurrency:
+      group: pages-from-main
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 55
     environment: github-pages
     env:
-      TASK_ID: ${{ inputs.task }}
-      ATTEMPT: ${{ inputs.attempt }}
-      RUNNER_KEY: ${{ secrets.RUNNER_KEY }}
-      API_URL: ${{ vars.API_URL || (github.repository == 'Narutomaki-0721/AMC.github.io' && 'https://mcm-team-api.mcm-hub.workers.dev') || '' }}
+      TASK_ID: ${{ inputs.task || needs.queue.outputs.task }}
+      ATTEMPT: ${{ inputs.attempt || needs.queue.outputs.attempt }}
     steps:
       - uses: actions/checkout@v4
         with:

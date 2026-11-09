@@ -1,4 +1,5 @@
 import { planCollection } from './collection-plan.mjs'
+import { authorizeRunner } from './runner-auth.mjs'
 import { retrieve, references, loadKnowledge } from './knowledge.mjs'
 const sections=['赛程消息','历年赛题收集','参考资料文档','笔记与练习']
 const now=()=>new Date().toISOString()
@@ -81,16 +82,12 @@ export async function decide(db,id,action,user){
 }
 async function pump(env){
  const time=Date.now()
- const {results}=await env.DB.prepare("SELECT a.* FROM attempts a JOIN tasks t ON t.id=a.task AND t.attempt=a.n WHERE t.status='running' AND a.touched<? LIMIT 30").bind(time-180000).all()
+ const {results}=await env.DB.prepare("SELECT a.* FROM attempts a JOIN tasks t ON t.id=a.task AND t.attempt=a.n WHERE t.status='running' AND a.touched<? AND (a.run IS NOT NULL OR ?=1) ORDER BY a.touched LIMIT 30").bind(time-180000,env.DISPATCH_TOKEN?1:0).all()
  for(const a of results){
  if(a.run){if(a.touched<time-3600000)await finish(env,a.task,a.n,a.run,false,'执行超时，未收到完成回报');continue}
+ if(!env.DISPATCH_TOKEN)continue // GitHub's scheduled worker polls the queue.
  const reservation=await env.DB.prepare('UPDATE attempts SET touched=? WHERE task=? AND n=? AND touched=? AND run IS NULL').bind(time,a.task,a.n,a.touched).run()
  if(!reservation.meta.changes)continue
- const missing=['DISPATCH_TOKEN','RUNNER_KEY'].filter(key=>!env[key])
- if(missing.length){
-   await finish(env,a.task,a.n,null,false,'执行配置缺少 '+missing.join('、')+'，配置后再重做')
-   continue
- }
  const r=await fetch('https://api.github.com/repos/'+env.REPO+'/actions/workflows/collect.yml/dispatches',{method:'POST',headers:{Authorization:'Bearer '+env.DISPATCH_TOKEN,'User-Agent':'mcm-hub','Content-Type':'application/json'},body:JSON.stringify({ref:env.BRANCH||'main',inputs:{task:a.task,attempt:String(a.n)}})})
  if(!r.ok)await finish(env,a.task,a.n,null,false,'GitHub 派发失败，HTTP '+r.status)
  }
@@ -103,9 +100,13 @@ async function finish(env,id,n,run,success,message,url=null){
  env.DB.prepare('UPDATE attempts SET stage=?,log=log||?,url=?,touched=? WHERE task=? AND n=? AND run IS ? AND stage NOT IN (\'失败\',\'已发布\')').bind(stage,'\n'+now()+' '+message,url,Date.now(),id,n,run)])
 }
 async function runner(req,env){
- if(!env.RUNNER_KEY||req.headers.get('Authorization')!=='Bearer '+env.RUNNER_KEY)fail(403,'无执行权限')
  const {id,n,run,event,message,path,batch,items}=await req.json()
+ await authorizeRunner(req,env,event,run)
  const db=env.DB
+ if(event==='next'){
+   const row=await db.prepare("SELECT a.task,a.n AS attempt FROM attempts a JOIN tasks t ON t.id=a.task AND t.attempt=a.n WHERE t.status='running' AND a.run IS NULL AND a.stage='排队中' ORDER BY t.reviewed,t.id LIMIT 1").first()
+   return row || {task:null}
+ }
  if(event==='claim'){
  const reservation=await db.prepare("UPDATE attempts SET run=?,touched=?,stage='检索中' WHERE task=? AND n=? AND run IS NULL AND stage='排队中' AND EXISTS(SELECT 1 FROM tasks WHERE id=? AND attempt=? AND status='running')").bind(run,Date.now(),id,n,id,n).run()
  if(!reservation.meta.changes)return {skip:true}

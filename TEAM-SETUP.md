@@ -19,14 +19,14 @@ npm run dev
 
 1. 在 Cloudflare 账户创建 D1 数据库。复制 worker/wrangler.example.jsonc 为同目录的 wrangler.jsonc，填数据库 ID、模型地址和模型标识。使用支持 JSON 输出的 Chat Completions 兼容模型。SITE_ORIGIN 是 Pages 的域名，SITE_BASE 是项目路径。
 2. 在 worker 目录通过 Wrangler 执行 `wrangler d1 execute mcm-hub --remote --file schema.sql`。本地调试用 --local。
-3. 使用 `wrangler secret put NAME` 分别设置 MODEL_KEY、DISPATCH_TOKEN、RUNNER_KEY、MEMBERS_JSON。DISPATCH_TOKEN 用只限目标仓库、具有 Actions 写权限的细粒度 GitHub token。RUNNER_KEY 是由管理员随机生成的长密钥，仅供执行器回报。
+3. 使用 `wrangler secret put NAME` 设置 MODEL_KEY、MEMBERS_JSON。REPO_ID 填 GitHub 仓库的数字 ID。GitHub 每 15 分钟计划检查已批准的任务，实际开始时间由 GitHub 排队决定；也可以在 Actions 手动运行 Approved knowledge request 并留空输入。回报默认用 GitHub OIDC 短时令牌，验证仓库 ID、主分支、工作流、运行编号和发布环境。DISPATCH_TOKEN 是可选的即时派发设置。
 4. 每个成员用独立随机访问码。运行 `node scripts/member-code.mjs` 生成 256 位随机访问码和 SHA-256。将访问码私下交给该成员，MEMBERS_JSON 设置为形如 `{"成员访问码的sha256":{"name":"队长","approver":true}}` 的对象。移除对应哈希即撤销权限。成员输入的访问码仅保存在当前标签页的 sessionStorage。
 5. 运行 `wrangler deploy`，记下返回的 HTTPS 地址。开发调试可用 `wrangler dev` 及不提交的 .dev.vars。不要将 .dev.vars 放进 Git。
 
 ## GitHub 设置
 
 - Pages 的 Source 选 GitHub Actions。仓库变量 API_URL 填 Worker 地址，MODEL_URL 和 MODEL_NAME 与 Worker 配置一致。
-- Actions secrets：RUNNER_KEY 与 Worker 相同；SEARCH_KEY 是 Brave Search API key；MODEL_KEY 只在执行收录时使用。
+- Actions secrets：未配置 SEARCH_KEY 时，通用任务从 SciPy、scikit-learn、OR-Tools 的目录查找相关页面，赛程与赛题使用 COMAP 官方入口。SEARCH_KEY 是扩大到 Brave 搜索时的可选密钥；MODEL_KEY 只在执行收录时使用。
 - 主分支合并后，Knowledge Pages 工作流构建和发布。手动运行同一工作流可以刷新公开站点。Pages 工作流需要仓库允许 Pages 部署；收录工作流需要能提交内容到 main。如果分支规则强制一切修改走 PR，则需要调整执行器为 PR 发布流程。
 - 此版本的知识库文章公开。获发访问码的成员可对话、查看团队任务。审批成员可批准、拒绝、重做。输入的原始对话仅用于当前标签页，任务请求会存入 D1，模型调用本身仍经所配置的模型服务。
 - “上传文档”提供四个 GitHub 上传入口。每次开发启动和正式构建都会把四个栏目目录中的 DOCX、PDF、TXT 转成 Markdown。MD 直接编译。自动生成的 *.imported.md 随原文件增删更新，不进入 Git。原文件公开可查。
